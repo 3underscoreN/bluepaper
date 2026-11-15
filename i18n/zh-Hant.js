@@ -14,11 +14,11 @@ window.I18N['zh-Hant'] = {
   'topbar.lightMode': '切換至淺色模式',
 
   'upload.title': '你的存檔，離線看。',
-  'upload.lede': '把 .zip 拖到下方，就可以看貼文、相片、朋友和訊息。',
+  'upload.lede': '把 .zip 檔案拖到下方，就可以看貼文、相片、朋友和訊息。',
   'upload.choose': '選擇 .zip 檔案',
-  'upload.drop': '或拖放到這裡',
+  'upload.drop': '或把它們拖到這裡',
   'upload.privacy': 'zip 只在你的裝置上讀取，不會上傳或追蹤。',
-  'upload.hint': '在設定 → 下載你的資訊取得 .zip。',
+  'upload.hint': '在設定 → 下載你的資訊取得 .zip。如果匯出分成多個檔案，請一起加入。',
 
   'nav.home': '首頁',
   'nav.friends': '朋友',
@@ -30,7 +30,7 @@ window.I18N['zh-Hant'] = {
   'nav.main': '主選單',
   'nav.mobile': '手機導覽',
 
-  'status.opening': '正在開啟存檔…',
+  'status.opening': ({ count }) => count > 1 ? `正在開啟 ${count} 個存檔…` : '正在開啟存檔…',
   'status.profile': '正在讀取個人資料與聯絡人…',
   'status.photos': '正在讀取相片與相簿…',
   'status.posts': ({ count }) => `正在讀取 ${count} 個貼文檔案…`,
@@ -38,7 +38,7 @@ window.I18N['zh-Hant'] = {
   'status.media': '正在建立媒體索引…',
   'status.done': '完成',
 
-  'error.chooseZip': '選擇資料下載的 .zip 檔案。',
+  'error.chooseZip': '選擇一個或多個資料下載的 .zip 檔案。',
   'error.noUnzip': '這個瀏覽器無法解壓縮檔案。請使用最新版的 Chrome、Edge、Firefox 或 Safari。',
   'error.noDecompress': '你的瀏覽器無法解壓縮 zip 檔案。請使用最新版的 Chrome、Edge、Firefox 或 Safari。',
   'error.zipInvalid': '這不是有效的 .zip 檔案。',

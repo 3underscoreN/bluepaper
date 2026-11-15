@@ -37,15 +37,15 @@ try {
       <span class="brand-tag" data-i18n="brand.tag">archive</span>
     </div>
     <h1 data-i18n="upload.title">Your archive, offline.</h1>
-    <p class="upload-lede" data-i18n="upload.lede">Drop the .zip below to read your posts, photos, friends and messages.</p>
+    <p class="upload-lede" data-i18n="upload.lede">Drop the .zip files below to read your posts, photos, friends and messages.</p>
 
     <label id="drop-zone" class="drop-zone" for="zip-input">
       <span class="drop-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="17"/></svg>
       </span>
-      <strong data-i18n="upload.choose">Choose a .zip file</strong>
-      <span class="drop-sub" data-i18n="upload.drop">or drag and drop it here</span>
-      <input id="zip-input" type="file" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+      <strong data-i18n="upload.choose">Choose .zip files</strong>
+      <span class="drop-sub" data-i18n="upload.drop">or drag them here</span>
+      <input id="zip-input" type="file" accept=".zip,application/zip,application/x-zip-compressed" multiple hidden>
     </label>
 
     <div id="load-status" class="load-status" role="status" aria-live="polite" hidden></div>
@@ -54,7 +54,7 @@ try {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       <span data-i18n="upload.privacy">The zip stays on this device. Nothing is uploaded or tracked.</span>
     </p>
-    <p class="upload-hint" data-i18n="upload.hint">Get the .zip from Settings → Download your information.</p>
+    <p class="upload-hint" data-i18n="upload.hint">Get the .zip files from Settings → Download your information. If the export came in several parts, add them all.</p>
   </main>
 </div>
 

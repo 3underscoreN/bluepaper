@@ -14,11 +14,11 @@ window.I18N.en = {
   'topbar.lightMode': 'Switch to light mode',
 
   'upload.title': 'Your archive, offline.',
-  'upload.lede': 'Drop the .zip below to read your posts, photos, friends and messages.',
-  'upload.choose': 'Choose a .zip file',
-  'upload.drop': 'or drag and drop it here',
+  'upload.lede': 'Drop the .zip files below to read your posts, photos, friends and messages.',
+  'upload.choose': 'Choose .zip files',
+  'upload.drop': 'or drag them here',
   'upload.privacy': 'The zip stays on this device. Nothing is uploaded or tracked.',
-  'upload.hint': 'Get the .zip from Settings → Download your information.',
+  'upload.hint': 'Get the .zip files from Settings → Download your information. If the export came in several parts, add them all.',
 
   'nav.home': 'Home',
   'nav.friends': 'Friends',
@@ -30,7 +30,7 @@ window.I18N.en = {
   'nav.main': 'Main',
   'nav.mobile': 'Mobile navigation',
 
-  'status.opening': 'Opening archive…',
+  'status.opening': ({ count }) => count > 1 ? `Opening ${count} archives…` : 'Opening archive…',
   'status.profile': 'Reading profile and connections…',
   'status.photos': 'Reading photos and albums…',
   'status.posts': ({ count }) => `Reading ${count} post file${count === 1 ? '' : 's'}…`,
@@ -38,7 +38,7 @@ window.I18N.en = {
   'status.media': 'Indexing media…',
   'status.done': 'Done',
 
-  'error.chooseZip': 'Choose the .zip from your data download.',
+  'error.chooseZip': 'Choose one or more .zip files from your data download.',
   'error.noUnzip': "This browser can't unzip files. Use a current version of Chrome, Edge, Firefox or Safari.",
   'error.noDecompress': "Your browser can't decompress zip files. Use a current version of Chrome, Edge, Firefox or Safari.",
   'error.zipInvalid': 'This file is not a valid .zip archive.',

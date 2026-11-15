@@ -1,14 +1,14 @@
 # Bluepaper
 
-Bluepaper reads a personal social-media export from a `.zip` and shows the posts, photos, friends and messages inside it. It runs in the browser.
+Bluepaper reads a personal social-media export from one or more `.zip` files and shows the posts, photos, friends and messages inside it. It runs in the browser.
 
-The zip is read with `File.slice()` and `DecompressionStream`, so the file never gets uploaded. The only network requests happen when you click a link to somewhere else. Standard and ZIP64 archives both work.
+It reads the zip files with `File.slice()` and `DecompressionStream`, so nothing gets uploaded. The only network requests happen when you click a link to somewhere else. Standard and ZIP64 archives both work, and the parts of a split export are merged before the viewer opens.
 
 ## Run it
 
-1. Get the `.zip` from your data download.
+1. Get the `.zip` from your data download. If there are several parts, keep them all.
 2. Open `index.html` in a current browser (Chrome, Edge, Firefox, Safari 16.4+). You can double-click the file.
-3. Pick the zip, or drag it onto the page.
+3. Pick one zip, or select every part. You can also drag several files in at once.
 
 If your browser blocks local files, serve the folder:
 
@@ -35,7 +35,13 @@ Translations are in `i18n/en.js` and `i18n/zh-Hant.js`. They load as plain scrip
 - Comments, reactions and saved items
 - Friends
 
-Paths are matched by suffix, so an extra wrapper folder in the zip is fine. Double-encoded text such as `ã±ã«...` is repaired while parsing.
+All selected parts are read together, so a split export behaves like one archive. Paths are matched by suffix, so an extra wrapper folder in the zip is fine. Double-encoded text such as `ã±ã«...` is repaired while parsing.
+
+## What stays in memory
+
+The zip files are never read into memory whole. Bluepaper reads each zip's central directory, then slices one entry from the file when it needs it. JSON files are parsed into memory. Photos load as they come near the viewport, and videos load when you open them. The browser keeps those decoded media blobs for the rest of the session.
+
+That is fine for small and medium exports. A very large messages file, or a single multi-gigabyte video, can still exhaust memory. Splitting an export into parts helps with download size. It does not make one huge media file smaller.
 
 ## What you can do
 
@@ -50,8 +56,7 @@ Likes, comments, new posts and replies stay in memory and disappear when you ref
 
 ## Limits
 
-- One zip at a time. Multi-part exports are not merged, and encrypted or multi-disk archives are not supported.
-- ZIP64 works, but a very large single media file still has to be decompressed into memory.
+- Multiple parts are merged, but encrypted entries and multi-disk archives are not supported.
 - Message photos and files only appear if the export included them.
 - Friend photos are not in the basic export, so friends show initials.
 - Sharing is off. Nothing leaves the page except links you click.
@@ -63,8 +68,8 @@ Likes, comments, new posts and replies stay in memory and disappear when you ref
 node test/selftest.mjs
 ```
 
-The test covers mojibake repair, date formatting, nested-path lookup, standard and ZIP64 parsing, and matching keys in the two dictionaries.
+The test covers mojibake repair, date formatting, nested-path lookup, ZIP64 parsing, reading two archive parts, and matching keys in the two dictionaries.
 
 ## About this build
 
-This project was generated in one shot by an AI coding agent, then tested against the export in this folder and a small ZIP64 fixture. Other export versions may still need parser changes.
+This project was generated in one shot by an AI coding agent, then tested against a full export, a two-part synthetic export, and a small ZIP64 fixture. Other export versions may still need parser changes.

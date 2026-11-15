@@ -395,6 +395,61 @@ class Zip {
   }
 }
 
+/* ---------------- multiple archives ----------------
+   Split exports arrive as several zips. Keep each File as a handle,
+   merge the entry lists, and read from whichever part holds the entry. */
+class ZipSet {
+  constructor(files) {
+    this.files = files;
+    this.zips = [];
+    this.allEntries = [];
+  }
+
+  async open() {
+    for (const file of this.files) {
+      const zip = new Zip(file);
+      await zip.open();
+      this.zips.push(zip);
+      for (const entry of zip.entries.values()) {
+        entry.archive = zip;
+        this.allEntries.push(entry);
+      }
+    }
+    if (!this.zips.length) throw new Error(t('error.zipInvalid'));
+  }
+
+  findAll(regex) {
+    return this.allEntries.filter((entry) => {
+      regex.lastIndex = 0;
+      return regex.test(entry.name);
+    });
+  }
+
+  find(path) {
+    if (!path) return null;
+    const wanted = path.replace(/\\/g, '/').replace(/^\.?\//, '');
+    for (const zip of this.zips) {
+      const entry = zip.find(wanted);
+      if (entry) return entry;
+    }
+    return null;
+  }
+
+  async bytes(entry) {
+    if (!entry || !entry.archive) throw new Error(t('error.entryMissing'));
+    return entry.archive.bytes(entry);
+  }
+
+  async text(entry) {
+    return new TextDecoder('utf-8').decode(await this.bytes(entry));
+  }
+
+  async json(entry) {
+    const raw = await this.text(entry);
+    return JSON.parse(raw, (_key, value) => (typeof value === 'string' ? fixText(value) : value));
+  }
+}
+
 /* ---------------- formatting ---------------- */
 const DAY_MS = 86400000;
 const formatterCache = new Map();
@@ -531,13 +586,44 @@ function mediaUrl(uri) {
   return promise;
 }
 
-function setImg(img, uri) {
+const imageObserver = typeof IntersectionObserver === 'function'
+  ? new IntersectionObserver((entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        observer.unobserve(entry.target);
+        loadImg(entry.target);
+      }
+    }, { rootMargin: '500px' })
+  : null;
+
+function loadImg(img) {
+  if (img.dataset.loading) return;
+  const uri = img.dataset.uri;
+  if (!uri) return;
+  img.dataset.loading = '1';
   const ready = resolvedMediaUrls.get(uri);
   if (ready) { img.src = ready; return; }
   mediaUrl(uri).then((url) => {
     if (url) img.src = url;
     else img.classList.add('missing');
   });
+}
+
+function setImg(img, uri, immediate = false) {
+  if (!uri) {
+    img.classList.add('missing');
+    return;
+  }
+  const ready = resolvedMediaUrls.get(uri);
+  if (ready) { img.src = ready; return; }
+  img.dataset.uri = uri;
+  if (immediate || !imageObserver) {
+    loadImg(img);
+    return;
+  }
+  if (img.dataset.observed) return;
+  img.dataset.observed = '1';
+  imageObserver.observe(img);
 }
 
 function avatar(name, size = 40, uri = null, extra = '') {
@@ -632,14 +718,12 @@ const state = {
 };
 
 /* ---------------- parsing ---------------- */
-async function readJson(zip, path) {
-  if (!path) return null;
-  const entry = zip.find(path);
+async function readJson(zip, entry) {
   if (!entry) return null;
   try {
     return await zip.json(entry);
   } catch (err) {
-    console.warn('Could not read', path, err);
+    console.warn('Could not read', entry.name, err);
     return null;
   }
 }
@@ -792,43 +876,47 @@ function reactionEmoji(value) {
 }
 
 /* ---------------- loading ---------------- */
-async function loadExport(file, status = () => {}) {
+async function loadExport(files, status = () => {}) {
   if (typeof DecompressionStream === 'undefined') {
     throw new Error(t('error.noUnzip'));
   }
 
-  status(t('status.opening'));
-  const zip = new Zip(file);
+  const fileList = Array.isArray(files) ? files : [files];
+  status(t('status.opening', { count: fileList.length }));
+  const zip = new ZipSet(fileList);
   await zip.open();
   state.zip = zip;
-  const paths = [...zip.entries.keys()];
-  const all = (re) => paths.filter((p) => re.test(p));
-  const one = (re) => all(re)[0] || null;
 
-  const profilePath = one(/(?:^|\/)personal_information\/profile_information\/profile_information\.json$/);
-  const friendsPath = one(/(?:^|\/)connections\/friends\/your_friends\.json$/);
-  const pagesPath = one(/(?:^|\/)pages\/pages_you've_liked\.json$/);
-  const groupsPath = one(/(?:^|\/)groups\/your_group_membership_activity\.json$/);
-  const savedPath = one(/(?:^|\/)saved_items_and_collections\/your_saved_items\.json$/);
-  const commentsPath = one(/(?:^|\/)comments_and_reactions\/comments\.json$/);
-  const reactionPaths = all(/(?:^|\/)comments_and_reactions\/likes_and_reactions(?:_\d+)?\.json$/);
-  const albumPaths = all(/(?:^|\/)posts\/album\/\d+\.json$/);
-  const postPaths = all(/(?:^|\/)posts\/(?:your_posts[^/]*|archive)\.json$/);
-  const videoPaths = all(/(?:^|\/)posts\/your_videos\.json$/);
-  const messagePaths = all(/(?:^|\/)messages\/(?:inbox|archived_threads)\/[^/]+\/message_\d+\.json$/).sort();
+  const find = (re) => zip.findAll(re);
+  const profileEntries = find(/(?:^|\/)personal_information\/profile_information\/profile_information\.json$/);
+  const friendEntries = find(/(?:^|\/)connections\/friends\/your_friends\.json$/);
+  const pageEntries = find(/(?:^|\/)pages\/pages_you've_liked\.json$/);
+  const groupEntries = find(/(?:^|\/)groups\/your_group_membership_activity\.json$/);
+  const savedEntries = find(/(?:^|\/)saved_items_and_collections\/your_saved_items\.json$/);
+  const commentEntries = find(/(?:^|\/)comments_and_reactions\/comments\.json$/);
+  const reactionEntries = find(/(?:^|\/)comments_and_reactions\/likes_and_reactions(?:_\d+)?\.json$/);
+  const albumEntries = find(/(?:^|\/)posts\/album\/\d+\.json$/);
+  const postEntries = find(/(?:^|\/)posts\/(?:your_posts[^/]*|archive)\.json$/);
+  const videoEntries = find(/(?:^|\/)posts\/your_videos\.json$/);
+  const messageEntries = find(/(?:^|\/)messages\/(?:inbox|archived_threads)\/[^/]+\/message_\d+\.json$/);
 
-  if (!profilePath && !postPaths.length && !messagePaths.length) {
+  if (!profileEntries.length && !postEntries.length && !messageEntries.length) {
     throw new Error(t('error.notExport'));
   }
 
   status(t('status.profile'));
-  const [profileRaw, friendsRaw, pagesRaw, groupsRaw, savedRaw, commentsRaw] = await Promise.all([
-    readJson(zip, profilePath),
-    readJson(zip, friendsPath),
-    readJson(zip, pagesPath),
-    readJson(zip, groupsPath),
-    readJson(zip, savedPath),
-    readJson(zip, commentsPath),
+  let profileRaw = null;
+  for (const entry of profileEntries) {
+    const raw = await readJson(zip, entry);
+    if (raw) { profileRaw = raw; break; }
+  }
+
+  const [friendFiles, pageFiles, groupFiles, savedFiles, commentFiles] = await Promise.all([
+    Promise.all(friendEntries.map((entry) => readJson(zip, entry))),
+    Promise.all(pageEntries.map((entry) => readJson(zip, entry))),
+    Promise.all(groupEntries.map((entry) => readJson(zip, entry))),
+    Promise.all(savedEntries.map((entry) => readJson(zip, entry))),
+    Promise.all(commentEntries.map((entry) => readJson(zip, entry))),
   ]);
 
   const p = profileRaw?.profile_v2 || profileRaw || {};
@@ -844,33 +932,69 @@ async function loadExport(file, status = () => {}) {
     coverUri: null,
   };
 
-  state.friends = (friendsRaw?.friends_v2 || [])
-    .filter((f) => f && cleanText(f.name))
-    .map((f) => ({ name: cleanText(f.name), ts: f.timestamp || 0 }));
+  const friendMap = new Map();
+  for (const raw of friendFiles) {
+    for (const friend of raw?.friends_v2 || []) {
+      const name = cleanText(friend.name);
+      if (!name) continue;
+      const ts = friend.timestamp || 0;
+      const previous = friendMap.get(name);
+      if (!previous || ts > previous.ts) friendMap.set(name, { name, ts });
+    }
+  }
+  state.friends = [...friendMap.values()];
 
-  state.pages = (pagesRaw?.page_likes_v2 || [])
-    .filter((pg) => pg && cleanText(pg.name))
-    .map((pg) => ({ name: cleanText(pg.name), ts: pg.timestamp || 0, url: safeUrl(pg.url) ? pg.url : '' }));
+  const pageMap = new Map();
+  for (const raw of pageFiles) {
+    for (const page of raw?.page_likes_v2 || []) {
+      const name = cleanText(page.name);
+      if (!name) continue;
+      const previous = pageMap.get(name);
+      if (!previous) {
+        pageMap.set(name, { name, ts: page.timestamp || 0, url: safeUrl(page.url) ? page.url : '' });
+      }
+    }
+  }
+  state.pages = [...pageMap.values()];
 
   const groupMap = new Map();
-  for (const item of groupsRaw?.groups_joined_v2 || []) {
-    const name = cleanText(item.data?.[0]?.name || item.title || '');
-    if (!name) continue;
-    const ts = item.timestamp || 0;
-    const status = /stopped/i.test(item.title || '') ? 'left' : 'joined';
-    const previous = groupMap.get(name);
-    if (!previous || ts >= previous.ts) groupMap.set(name, { name, ts, status });
+  for (const raw of groupFiles) {
+    for (const item of raw?.groups_joined_v2 || []) {
+      const name = cleanText(item.data?.[0]?.name || item.title || '');
+      if (!name) continue;
+      const ts = item.timestamp || 0;
+      const status = /stopped/i.test(item.title || '') ? 'left' : 'joined';
+      const previous = groupMap.get(name);
+      if (!previous || ts >= previous.ts) groupMap.set(name, { name, ts, status });
+    }
   }
   state.groups = [...groupMap.values()].sort((a, b) => b.ts - a.ts);
 
-  state.saved = (savedRaw?.saves_v2 || [])
-    .filter((s) => s && cleanText(s.title))
-    .map((s) => ({ title: cleanText(s.title), ts: s.timestamp || 0 }));
+  const savedMap = new Map();
+  for (const raw of savedFiles) {
+    for (const item of raw?.saves_v2 || []) {
+      const title = cleanText(item.title);
+      if (!title) continue;
+      const ts = item.timestamp || 0;
+      const key = `${ts}|${title}`;
+      if (!savedMap.has(key)) savedMap.set(key, { title, ts });
+    }
+  }
+  state.saved = [...savedMap.values()].sort((a, b) => b.ts - a.ts);
 
-  const rawComments = Array.isArray(commentsRaw) ? commentsRaw : (commentsRaw?.comments_v2 || []);
-  state.comments = rawComments.map(normalizeComment).filter((c) => c.text || c.title).sort((a, b) => b.ts - a.ts);
+  const commentMap = new Map();
+  for (const raw of commentFiles) {
+    const rawComments = Array.isArray(raw) ? raw : (raw?.comments_v2 || []);
+    for (const item of rawComments) {
+      const comment = normalizeComment(item);
+      if (!comment.text && !comment.title) continue;
+      const key = `${comment.ts}|${comment.text}|${comment.title}`;
+      if (!commentMap.has(key)) commentMap.set(key, comment);
+    }
+  }
+  state.comments = [...commentMap.values()].sort((a, b) => b.ts - a.ts);
 
-  const reactionFiles = await Promise.all(reactionPaths.map((path) => readJson(zip, path)));
+  const reactionFiles = await Promise.all(reactionEntries.map((entry) => readJson(zip, entry)));
   const reactionMap = new Map();
   for (const raw of reactionFiles) {
     if (!Array.isArray(raw)) continue;
@@ -891,44 +1015,83 @@ async function loadExport(file, status = () => {}) {
   state.reactions = [...reactionMap.values()].sort((a, b) => b.ts - a.ts);
 
   status(t('status.photos'));
-  const albumFiles = (await Promise.all(albumPaths.map((path) => readJson(zip, path)))).filter(Boolean);
-  state.albums = albumFiles.map((a) => ({
-    name: cleanText(a.name || t('photos.album')),
-    photos: (a.photos || [])
-      .filter((ph) => ph && typeof ph.uri === 'string' && kindOf(ph.uri) === 'image')
-      .map((ph) => ({
-        uri: ph.uri,
-        ts: ph.creation_timestamp || 0,
-        caption: cleanText(ph.description || ph.title || ''),
-      })),
-  })).filter((a) => a.photos.length);
+  const albumFiles = (await Promise.all(albumEntries.map((entry) => readJson(zip, entry)))).filter(Boolean);
+  const albumMap = new Map();
+  for (const raw of albumFiles) {
+    const name = cleanText(raw.name || t('photos.album'));
+    let album = albumMap.get(name);
+    if (!album) {
+      album = { name, photos: [], seen: new Set() };
+      albumMap.set(name, album);
+    }
+    for (const photo of raw.photos || []) {
+      if (!photo || typeof photo.uri !== 'string' || kindOf(photo.uri) !== 'image') continue;
+      if (album.seen.has(photo.uri)) continue;
+      album.seen.add(photo.uri);
+      album.photos.push({
+        uri: photo.uri,
+        ts: photo.creation_timestamp || 0,
+        caption: cleanText(photo.description || photo.title || ''),
+      });
+    }
+  }
+  state.albums = [...albumMap.values()]
+    .map(({ seen, ...album }) => album)
+    .filter((album) => album.photos.length);
 
   const profileAlbum = state.albums.find((a) => /profile pictures/i.test(a.name));
   const coverAlbum = state.albums.find((a) => /cover photos/i.test(a.name));
   state.profile.avatarUri = profileAlbum?.photos[0]?.uri || null;
   state.profile.coverUri = coverAlbum?.photos[0]?.uri || null;
 
-  status(t('status.posts', { count: postPaths.length }));
-  const postFiles = [];
-  for (const path of postPaths) postFiles.push({ path, raw: await readJson(zip, path) });
+  status(t('status.posts', { count: postEntries.length }));
   const mainPosts = [];
   const archivePosts = [];
-  for (const { path, raw } of postFiles) {
+  for (const entry of postEntries) {
+    const raw = await readJson(zip, entry);
     const posts = Array.isArray(raw) ? raw.map(normalizePost).filter(Boolean) : [];
-    if (/\/archive\.json$/.test(path)) archivePosts.push(...posts);
+    if (/\/archive\.json$/.test(entry.name)) archivePosts.push(...posts);
     else mainPosts.push(...posts);
   }
-  state.posts = mergePosts(mainPosts, archivePosts).sort((a, b) => b.ts - a.ts);
-
-  status(t('status.threads', { count: messagePaths.length }));
-  const threads = [];
-  for (const path of messagePaths) {
-    const raw = await readJson(zip, path);
-    if (raw) threads.push(normalizeThread(raw, path));
+  const postMap = new Map();
+  for (const post of mergePosts(mainPosts, archivePosts)) {
+    const existing = postMap.get(post.id);
+    if (!existing) {
+      postMap.set(post.id, post);
+      continue;
+    }
+    for (const media of post.media) {
+      if (!existing.media.some((m) => m.uri === media.uri)) existing.media.push(media);
+    }
+    if (!existing.text && post.text) existing.text = post.text;
+    if (!existing.url && post.url) existing.url = post.url;
   }
-  state.threads = threads.sort((a, b) => threadLastTs(b) - threadLastTs(a));
+  state.posts = [...postMap.values()].sort((a, b) => b.ts - a.ts);
 
-  const videoRaw = videoPaths.length ? await readJson(zip, videoPaths[0]) : null;
+  status(t('status.threads', { count: messageEntries.length }));
+  const threadMap = new Map();
+  for (const entry of messageEntries) {
+    const raw = await readJson(zip, entry);
+    if (!raw) continue;
+    const thread = normalizeThread(raw, entry.name);
+    const existing = threadMap.get(thread.id);
+    if (!existing) {
+      threadMap.set(thread.id, thread);
+      continue;
+    }
+    existing.archived = existing.archived || thread.archived;
+    const seen = new Set(existing.messages.map(messageKey));
+    for (const message of thread.messages) {
+      const key = messageKey(message);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      existing.messages.push(message);
+    }
+    existing.messages.sort((a, b) => a.ts - b.ts);
+  }
+  state.threads = [...threadMap.values()].sort((a, b) => threadLastTs(b) - threadLastTs(a));
+
+  const videoFiles = (await Promise.all(videoEntries.map((entry) => readJson(zip, entry)))).filter(Boolean);
 
   status(t('status.media'));
   const mediaMap = new Map();
@@ -942,8 +1105,10 @@ async function loadExport(file, status = () => {}) {
     for (const photo of album.photos) addMedia(photo.uri, album.name, photo.ts, photo.caption);
   }
   for (const post of state.posts) for (const m of post.media) addMedia(m.uri, '', m.ts, '');
-  for (const video of videoRaw?.videos_v2 || []) {
-    addMedia(video.uri, 'Videos', video.creation_timestamp, cleanText(video.description || video.title || ''));
+  for (const raw of videoFiles) {
+    for (const video of raw?.videos_v2 || []) {
+      addMedia(video.uri, 'Videos', video.creation_timestamp, cleanText(video.description || video.title || ''));
+    }
   }
   state.media = [...mediaMap.values()].sort((a, b) => b.ts - a.ts);
 
@@ -951,6 +1116,17 @@ async function loadExport(file, status = () => {}) {
 }
 
 /* ---------------- derived helpers ---------------- */
+function messageKey(message) {
+  return [
+    message.sender,
+    message.ts,
+    message.content,
+    message.share?.link || '',
+    message.share?.text || '',
+    ...message.media.map((m) => m.uri),
+  ].join('|');
+}
+
 function threadLastTs(thread) {
   const last = thread.messages[thread.messages.length - 1];
   return last ? last.ts : 0;
@@ -1392,9 +1568,9 @@ function postMediaGrid(media) {
       onclick: () => openLightbox(media, index),
     });
     if (item.kind === 'video') {
-      const video = el('video', { preload: 'metadata', muted: true, playsinline: true });
-      mediaUrl(item.uri).then((url) => { if (url) video.src = url; });
-      cell.append(video, el('span', { class: 'media-play' }, icon('play', 46)));
+      cell.classList.add('video-tile');
+      cell.style.background = 'linear-gradient(135deg,#3a3b3c,#1c1e21)';
+      cell.append(el('span', { class: 'media-play' }, icon('play', 46)));
     } else {
       const img = el('img', { alt: '', loading: 'lazy' });
       setImg(img, item.uri);
@@ -1622,9 +1798,12 @@ function messageRow(message, thread) {
       setImg(img, media.uri);
       bubble.append(el('div', { class: 'msg-media' }, img));
     } else if (media.kind === 'video') {
-      const video = el('video', { controls: true, preload: 'metadata' });
-      mediaUrl(media.uri).then((url) => { if (url) video.src = url; });
-      bubble.append(el('div', { class: 'msg-media' }, video));
+      bubble.append(el('button', {
+        class: 'msg-video-tile',
+        type: 'button',
+        'aria-label': t('photos.openVideo'),
+        onclick: () => openLightbox([media], 0),
+      }, icon('play', 34)));
     }
   }
   if (message.share) {
@@ -1980,7 +2159,7 @@ function renderLightbox() {
     stage.append(video);
   } else {
     const img = el('img', { alt: '' });
-    setImg(img, item.uri);
+    setImg(img, item.uri, true);
     stage.append(img);
   }
 
@@ -2073,15 +2252,14 @@ function showUploadError(message) {
   status.textContent = message;
 }
 
-async function handleFile(file) {
-  if (!file) return;
-  if (!/\.zip$/i.test(file.name)) {
+async function handleFiles(fileList) {
+  const files = Array.from(fileList || []).filter((file) => /\.zip$/i.test(file.name));
+  if (!files.length) {
     showUploadError(t('error.chooseZip'));
     return;
   }
   try {
-    setStatus(t('status.opening'));
-    await loadExport(file, setStatus);
+    await loadExport(files, setStatus);
     state.ready = true;
     $('#load-status').hidden = true;
     $('#upload-screen').hidden = true;
@@ -2102,9 +2280,9 @@ function initUpload() {
   const zone = $('#drop-zone');
   const input = $('#zip-input');
   input.addEventListener('change', () => {
-    const file = input.files && input.files[0];
+    const files = Array.from(input.files || []);
     input.value = '';
-    handleFile(file);
+    handleFiles(files);
   });
   for (const eventName of ['dragenter', 'dragover']) {
     zone.addEventListener(eventName, (event) => {
@@ -2118,7 +2296,7 @@ function initUpload() {
   zone.addEventListener('drop', (event) => {
     event.preventDefault();
     zone.classList.remove('dragging');
-    handleFile(event.dataTransfer?.files?.[0]);
+    handleFiles(event.dataTransfer?.files);
   });
   window.addEventListener('dragover', (event) => event.preventDefault());
   window.addEventListener('drop', (event) => event.preventDefault());
@@ -2165,5 +2343,5 @@ if (typeof document !== 'undefined') init();
 
 /* Exported only for the Node self-test; the browser ignores this. */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { fixText, initials, formatBirthday, Zip };
+  module.exports = { fixText, initials, formatBirthday, Zip, ZipSet };
 }

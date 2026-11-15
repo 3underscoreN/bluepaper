@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { deflateRawSync } from 'node:zlib';
 
 const require = createRequire(import.meta.url);
-const { fixText, initials, formatBirthday, Zip } = require('../app.js');
+const { fixText, initials, formatBirthday, Zip, ZipSet } = require('../app.js');
 
 // The export's double-encoded UTF-8, a normal Latin-1 string, and a normal emoji.
 const mojibake = Buffer.from('ケルビン　晨', 'utf8').toString('latin1');
@@ -152,6 +152,16 @@ await zip64.open();
 const zip64Entry = zip64.find('your_facebook_activity/posts/big.json');
 assert.ok(zip64Entry, 'ZIP64 suffix path lookup finds nested archive entries');
 assert.deepEqual(await zip64.json(zip64Entry), { name: 'ケルビン　晨' });
+
+// A split export: two parts with separate paths, read as one archive.
+const zipSet = new ZipSet([
+  new Blob([makeZip('part1/your_facebook_activity/posts/a.json', JSON.stringify({ part: 1 }))]),
+  new Blob([makeZip('part2/your_facebook_activity/posts/b.json', JSON.stringify({ part: 2 }))]),
+]);
+await zipSet.open();
+assert.equal(zipSet.findAll(/\/posts\/[^/]+\.json$/).length, 2, 'both archive parts are discoverable');
+assert.deepEqual(await zipSet.json(zipSet.find('your_facebook_activity/posts/a.json')), { part: 1 });
+assert.deepEqual(await zipSet.json(zipSet.find('your_facebook_activity/posts/b.json')), { part: 2 });
 
 // Both interface languages must stay complete.
 const localeContext = { window: {} };
